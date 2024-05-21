@@ -1,0 +1,54 @@
+def image_names = []
+
+def root_folders = []
+
+def service_names = []
+
+
+def ecrUrl = ''
+
+pipeline {
+
+  agent any
+  stages {
+
+      stage('Docker Build') { 
+        steps{ 
+            script {
+              for (int i = 0; i < image_names.size(); ++i) {
+                sh "docker build -t ${ecrUrl}:${image_names[i]}_latest -t ${ecrUrl}:${image_names[i]}_${BUILD_NUMBER} ${root_folders[i]}"
+              }
+            }
+        }
+      }
+
+      stage('Docker ECR') {
+        steps{ 
+            script {
+              sh "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ecr-url"
+              sh "docker push ${ecrUrl} --all-tags"              
+            }
+        }
+
+      }
+      stage('GC') {
+        steps {
+          script {
+            for (int i = 0; i < image_names.size(); ++i) {
+              sh "docker rmi ${ecrUrl}:${image_names[i]}_latest ${ecrUrl}:${image_names[i]}_${BUILD_NUMBER}"
+            }
+          }
+        }
+      }
+      stage('ECS-Deploy') {
+        steps {
+          script {
+            for (int i = 0; i < image_names.size(); ++i) {
+              sh "aws ecs update-service --cluster cluster-name --service ${service_names[i]} --force-new-deployment --region ur-region"
+            }
+          }
+        }
+      }
+
+  }
+}

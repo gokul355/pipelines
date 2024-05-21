@@ -1,0 +1,47 @@
+def env = ''
+def bucketName = ''
+
+
+def cfOriginID = ''
+def cloudfrontID = ''
+def distConfigFile1 = 'dist-config1.json'
+def distConfigFile2 = 'dist-config2.json'
+
+pipeline {
+
+  agent any
+  stages {
+    stage('Angular Build') { 
+        steps {
+          script {
+            sh 'cd folder-to-app && npm i  && ng build --prod'
+        }
+      }
+    }
+
+    stage('Angular S3') { 
+        steps{ 
+            script {
+              buildTime = new Date().format("ddMMyy_HH_mm", TimeZone.getTimeZone('UTC'))
+              sh "aws s3 sync .folder-to-app/dist/  s3://${bucketName}/${buildTime} "
+        }
+      }
+    }
+
+    stage('Cloudfront Update') { 
+        steps{ 
+            script {
+              echo "OriginPath is ${buildTime}"
+              updatedOriginPath = "/${buildTime}"
+            
+              sh "aws cloudfront get-distribution --id ${cloudfrontID} > ${distConfigFile1}"
+              def cfEtag = sh(script: "jq -r '.ETag' ${distConfigFile1}", returnStdout: true)
+              sh "cat ${distConfigFile1} | jq --arg targetOriginId ${cfOriginID} --arg newOriginPath ${updatedOriginPath} '.Distribution.DistributionConfig | .Origins.Items = (.Origins.Items | map(if (.Id == \$targetOriginId) then (.OriginPath = \$newOriginPath) else . end))'  > ${distConfigFile2}"
+              sh "aws cloudfront update-distribution --id ${cloudfrontID} --distribution-config 'file://${distConfigFile2}' --if-match ${cfEtag} > /qual/null"
+              sh "aws cloudfront create-invalidation --distribution-id ${cloudfrontID} --paths \"/index.html\""
+        }
+      }
+    }
+
+  }
+}
